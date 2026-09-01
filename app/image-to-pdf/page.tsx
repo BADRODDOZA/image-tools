@@ -495,11 +495,11 @@ export default function ImageToPdfPage() {
       );
 
       const blob = new Blob(
-        [pdf],
-        {
-          type: "application/pdf",
-        }
-      );
+  [new Uint8Array(pdf)],
+  {
+    type: "application/pdf",
+  }
+);
 
       const url =
         URL.createObjectURL(blob);
