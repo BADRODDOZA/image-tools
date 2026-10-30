@@ -3,14 +3,47 @@
 import { useState } from "react";
 import ImageCropper from "../components/ImageCropper";
 
-export default function ImageToJpgPage() {
-  const [image, setImage] = useState<string | null>(null);
-  const [showCropper, setShowCropper] = useState(false);
+type MergeImage = {
+  id: string;
+  image: string;
+  fileName: string;
+  width: number;
+  height: number;
+  originalSize: number;
+};
 
-  const [fileName, setFileName] = useState("");
-  const [originalWidth, setOriginalWidth] = useState(0);
-  const [originalHeight, setOriginalHeight] = useState(0);
-  const [originalSize, setOriginalSize] = useState(0);
+type JPGResult = {
+  dataUrl: string;
+  size: number;
+  quality: number;
+};
+
+function getDataUrlSize(dataUrl: string): number {
+  const base64 = dataUrl.split(",")[1] || "";
+
+  const padding = base64.endsWith("==")
+    ? 2
+    : base64.endsWith("=")
+      ? 1
+      : 0;
+
+  return Math.floor((base64.length * 3) / 4) - padding;
+}
+
+function getFileNameWithoutExtension(fileName: string): string {
+  return fileName.replace(/\.[^/.]+$/, "");
+}
+
+export default function ImageToJPGPage() {
+  const [mode, setMode] = useState<"single" | "merge">("single");
+
+  const [image, setImage] = useState<string | null>(null);
+  const [fileName, setFileName] = useState("image");
+
+  const [images, setImages] = useState<MergeImage[]>([]);
+  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
+
+  const [showCropper, setShowCropper] = useState(false);
 
   const [width, setWidth] = useState(0);
   const [height, setHeight] = useState(0);
@@ -18,873 +51,1551 @@ export default function ImageToJpgPage() {
   const [targetKB, setTargetKB] = useState(100);
   const [quality, setQuality] = useState(0.92);
 
-  const [result, setResult] = useState<string | null>(null);
-  const [resultSize, setResultSize] = useState(0);
+  const [mergeDirection, setMergeDirection] = useState<"vertical" | "horizontal">(
+    "vertical"
+  );
+
+  const [gap, setGap] = useState(0);
+
+  const [result, setResult] = useState<JPGResult | null>(null);
   const [message, setMessage] = useState("");
 
-  const handleFile = (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const file = e.target.files?.[0];
+  function loadImageDimensions(
+    dataUrl: string
+  ): Promise<{ width: number; height: number }> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
 
-    if (!file) return;
+      img.onload = () => {
+        resolve({
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+        });
+      };
 
+      img.onerror = () => {
+        reject(new Error("Unable to load image."));
+      };
+
+      img.src = dataUrl;
+    });
+  }
+
+  async function handleSingleFile(file: File) {
     if (!file.type.startsWith("image/")) {
-      alert("Please select an image.");
+      setMessage("Please select an image file.");
       return;
     }
 
-    setFileName(file.name);
-    setOriginalSize(file.size);
-
     const reader = new FileReader();
 
-    reader.onload = () => {
-      const imageData = reader.result as string;
+    reader.onload = async () => {
+      const dataUrl = reader.result as string;
 
-      setImage(imageData);
-      setResult(null);
-      setResultSize(0);
-      setMessage("");
+      try {
+        const dimensions = await loadImageDimensions(dataUrl);
 
-      // Open framing crop automatically
-      setShowCropper(true);
+        setImage(dataUrl);
+        setFileName(getFileNameWithoutExtension(file.name));
+        setWidth(dimensions.width);
+        setHeight(dimensions.height);
 
-      const img = new Image();
-
-      img.onload = () => {
-        setOriginalWidth(img.width);
-        setOriginalHeight(img.height);
-
-        setWidth(img.width);
-        setHeight(img.height);
-      };
-
-      img.src = imageData;
+        setResult(null);
+        setMessage("");
+      } catch {
+        setMessage("Could not load this image.");
+      }
     };
 
     reader.readAsDataURL(file);
-  };
+  }
 
-  const handleCrop = (
-    croppedImage: string
-  ) => {
-    setImage(croppedImage);
-    setShowCropper(false);
+  async function handleMultipleFiles(files: FileList | null) {
+    if (!files || files.length === 0) {
+      return;
+    }
 
+    const newImages: MergeImage[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+
+      if (!file.type.startsWith("image/")) {
+        continue;
+      }
+
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+
+        reader.onload = () => {
+          resolve(reader.result as string);
+        };
+
+        reader.onerror = () => {
+          reject(new Error("Could not read file."));
+        };
+
+        reader.readAsDataURL(file);
+      });
+
+      try {
+        const dimensions = await loadImageDimensions(dataUrl);
+
+        newImages.push({
+          id: `${Date.now()}-${i}-${Math.random()}`,
+          image: dataUrl,
+          fileName: file.name,
+          width: dimensions.width,
+          height: dimensions.height,
+          originalSize: file.size,
+        });
+      } catch {
+        // Ignore images that cannot be loaded.
+      }
+    }
+
+    if (newImages.length === 0) {
+      setMessage("No valid image files were selected.");
+      return;
+    }
+
+    setImages((previous) => [...previous, ...newImages]);
     setResult(null);
-    setResultSize(0);
     setMessage("");
 
-    const img = new Image();
+    setTimeout(() => {
+      updateMergeDimensions([...images, ...newImages]);
+    }, 0);
+  }
 
-    img.onload = () => {
-      setWidth(img.width);
-      setHeight(img.height);
+  function calculateMergeDimensions(
+    imageList: MergeImage[],
+    direction: "vertical" | "horizontal",
+    gapSize: number
+  ) {
+    if (imageList.length === 0) {
+      return {
+        width: 0,
+        height: 0,
+      };
+    }
+
+    if (direction === "vertical") {
+      const mergedWidth = Math.max(
+        ...imageList.map((item) => item.width)
+      );
+
+      const mergedHeight =
+        imageList.reduce((total, item) => total + item.height, 0) +
+        gapSize * Math.max(0, imageList.length - 1);
+
+      return {
+        width: mergedWidth,
+        height: mergedHeight,
+      };
+    }
+
+    const mergedWidth =
+      imageList.reduce((total, item) => total + item.width, 0) +
+      gapSize * Math.max(0, imageList.length - 1);
+
+    const mergedHeight = Math.max(
+      ...imageList.map((item) => item.height)
+    );
+
+    return {
+      width: mergedWidth,
+      height: mergedHeight,
     };
+  }
 
-    img.src = croppedImage;
-  };
+  function updateMergeDimensions(
+    imageList: MergeImage[] = images,
+    direction: "vertical" | "horizontal" = mergeDirection,
+    gapSize: number = gap
+  ) {
+    if (imageList.length === 0) {
+      setWidth(0);
+      setHeight(0);
+      return;
+    }
 
-  const createJpg = (
-    requestedQuality: number,
-    requestedWidth: number,
-    requestedHeight: number
-  ) => {
-    return new Promise<{
-      dataUrl: string;
-      size: number;
-    }>((resolve) => {
-      if (!image) return;
+    const dimensions = calculateMergeDimensions(
+      imageList,
+      direction,
+      gapSize
+    );
 
+    setWidth(dimensions.width);
+    setHeight(dimensions.height);
+  }
+
+  function handleModeChange(newMode: "single" | "merge") {
+    setMode(newMode);
+    setResult(null);
+    setMessage("");
+
+    if (newMode === "single") {
+      if (image) {
+        loadImageDimensions(image).then((dimensions) => {
+          setWidth(dimensions.width);
+          setHeight(dimensions.height);
+        });
+      }
+    } else {
+      updateMergeDimensions();
+    }
+  }
+
+  function moveImage(index: number, direction: "up" | "down") {
+    const newImages = [...images];
+
+    if (direction === "up" && index > 0) {
+      [newImages[index - 1], newImages[index]] = [
+        newImages[index],
+        newImages[index - 1],
+      ];
+    }
+
+    if (direction === "down" && index < newImages.length - 1) {
+      [newImages[index + 1], newImages[index]] = [
+        newImages[index],
+        newImages[index + 1],
+      ];
+    }
+
+    setImages(newImages);
+    setResult(null);
+    updateMergeDimensions(newImages);
+  }
+
+  function removeImage(id: string) {
+    const newImages = images.filter((item) => item.id !== id);
+
+    setImages(newImages);
+
+    if (selectedImageId === id) {
+      setSelectedImageId(null);
+      setShowCropper(false);
+    }
+
+    setResult(null);
+    updateMergeDimensions(newImages);
+  }
+
+  function openCropper(id: string) {
+    setSelectedImageId(id);
+    setShowCropper(true);
+  }
+
+  async function handleCrop(croppedImage: string) {
+    if (!selectedImageId) {
+      return;
+    }
+
+    try {
+      const dimensions = await loadImageDimensions(croppedImage);
+
+      const newImages = images.map((item) =>
+        item.id === selectedImageId
+          ? {
+              ...item,
+              image: croppedImage,
+              width: dimensions.width,
+              height: dimensions.height,
+            }
+          : item
+      );
+
+      setImages(newImages);
+      setShowCropper(false);
+      setSelectedImageId(null);
+      setResult(null);
+
+      updateMergeDimensions(newImages);
+    } catch {
+      setMessage("Could not process the cropped image.");
+    }
+  }
+
+  function createSingleJPG(
+    imageData: string,
+    outputWidth: number,
+    outputHeight: number,
+    jpgQuality: number
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
       const img = new Image();
 
       img.onload = () => {
-        const canvas =
-          document.createElement("canvas");
+        const canvas = document.createElement("canvas");
 
-        canvas.width = requestedWidth;
-        canvas.height = requestedHeight;
+        canvas.width = Math.max(1, Math.round(outputWidth));
+        canvas.height = Math.max(1, Math.round(outputHeight));
 
-        const ctx =
-          canvas.getContext("2d");
+        const ctx = canvas.getContext("2d");
 
-        if (!ctx) return;
+        if (!ctx) {
+          reject(new Error("Could not create canvas."));
+          return;
+        }
 
-        // JPG does not support transparency.
-        // Use white background.
         ctx.fillStyle = "#ffffff";
-
-        ctx.fillRect(
-          0,
-          0,
-          requestedWidth,
-          requestedHeight
-        );
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         ctx.drawImage(
           img,
           0,
           0,
-          requestedWidth,
-          requestedHeight
+          canvas.width,
+          canvas.height
         );
 
-        const dataUrl =
+        resolve(
           canvas.toDataURL(
             "image/jpeg",
-            requestedQuality
-          );
-
-        const base64 =
-          dataUrl.split(",")[1];
-
-        const size = Math.round(
-          (base64.length * 3) / 4
+            Math.min(1, Math.max(0.01, jpgQuality))
+          )
         );
-
-        resolve({
-          dataUrl,
-          size,
-        });
       };
 
-      img.src = image;
+      img.onerror = () => {
+        reject(new Error("Could not load image."));
+      };
+
+      img.src = imageData;
     });
-  };
+  }
 
-  const convertNormal = async () => {
-    if (!image) return;
+  async function createMergedJPG(
+    imageList: MergeImage[],
+    outputWidth: number,
+    outputHeight: number,
+    direction: "vertical" | "horizontal",
+    gapSize: number,
+    jpgQuality: number
+  ): Promise<string> {
+    if (imageList.length === 0) {
+      throw new Error("No images selected.");
+    }
 
-    setMessage("Creating JPG...");
+    const loadedImages = await Promise.all(
+      imageList.map(
+        (item) =>
+          new Promise<HTMLImageElement>((resolve, reject) => {
+            const img = new Image();
 
-    const converted =
-      await createJpg(
-        quality,
+            img.onload = () => resolve(img);
+            img.onerror = () =>
+              reject(new Error(`Could not load ${item.fileName}`));
+
+            img.src = item.image;
+          })
+      )
+    );
+
+    let naturalWidth = 0;
+    let naturalHeight = 0;
+
+    if (direction === "vertical") {
+      naturalWidth = Math.max(
+        ...loadedImages.map((img) => img.naturalWidth)
+      );
+
+      naturalHeight =
+        loadedImages.reduce(
+          (total, img) => total + img.naturalHeight,
+          0
+        ) +
+        gapSize * Math.max(0, loadedImages.length - 1);
+    } else {
+      naturalWidth =
+        loadedImages.reduce(
+          (total, img) => total + img.naturalWidth,
+          0
+        ) +
+        gapSize * Math.max(0, loadedImages.length - 1);
+
+      naturalHeight = Math.max(
+        ...loadedImages.map((img) => img.naturalHeight)
+      );
+    }
+
+    const finalWidth =
+      outputWidth > 0 ? Math.round(outputWidth) : naturalWidth;
+
+    const finalHeight =
+      outputHeight > 0 ? Math.round(outputHeight) : naturalHeight;
+
+    const canvas = document.createElement("canvas");
+
+    canvas.width = Math.max(1, finalWidth);
+    canvas.height = Math.max(1, finalHeight);
+
+    const ctx = canvas.getContext("2d");
+
+    if (!ctx) {
+      throw new Error("Could not create canvas.");
+    }
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const scaleX = canvas.width / naturalWidth;
+    const scaleY = canvas.height / naturalHeight;
+
+    if (direction === "vertical") {
+      let currentY = 0;
+
+      for (const img of loadedImages) {
+        const drawWidth = img.naturalWidth * scaleX;
+        const drawHeight = img.naturalHeight * scaleY;
+
+        const x = (canvas.width - drawWidth) / 2;
+
+        ctx.drawImage(
+          img,
+          x,
+          currentY,
+          drawWidth,
+          drawHeight
+        );
+
+        currentY += drawHeight + gapSize * scaleY;
+      }
+    } else {
+      let currentX = 0;
+
+      for (const img of loadedImages) {
+        const drawWidth = img.naturalWidth * scaleX;
+        const drawHeight = img.naturalHeight * scaleY;
+
+        const y = (canvas.height - drawHeight) / 2;
+
+        ctx.drawImage(
+          img,
+          currentX,
+          y,
+          drawWidth,
+          drawHeight
+        );
+
+        currentX += drawWidth + gapSize * scaleX;
+      }
+    }
+
+    return canvas.toDataURL(
+      "image/jpeg",
+      Math.min(1, Math.max(0.01, jpgQuality))
+    );
+  }
+
+  async function createJPG(
+    jpgQuality: number
+  ): Promise<string> {
+    if (mode === "single") {
+      if (!image) {
+        throw new Error("Please select an image first.");
+      }
+
+      return createSingleJPG(
+        image,
         width,
-        height
+        height,
+        jpgQuality
       );
+    }
 
-    setResult(converted.dataUrl);
-    setResultSize(converted.size);
-
-    setMessage(
-      "✅ JPG created successfully!"
+    return createMergedJPG(
+      images,
+      width,
+      height,
+      mergeDirection,
+      gap,
+      jpgQuality
     );
-  };
+  }
 
-  const reduceToTarget = async () => {
-    if (!image) return;
+  async function convertNormal() {
+    try {
+      setMessage("Converting...");
 
-    setMessage(
-      `Trying to create a JPG close to ${targetKB} KB...`
+      const dataUrl = await createJPG(quality);
+      const size = getDataUrlSize(dataUrl);
+
+      setResult({
+        dataUrl,
+        size,
+        quality,
+      });
+
+      setMessage(
+        `JPG created successfully. Size: ${(size / 1024).toFixed(1)} KB`
+      );
+    } catch (error) {
+      console.error(error);
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not create JPG."
+      );
+    }
+  }
+
+  async function createJpgForTargetKB(
+    requestedTargetKB: number
+  ): Promise<JPGResult> {
+    const targetBytes = Math.max(
+      1,
+      Math.round(requestedTargetKB * 1024)
     );
 
-    const targetBytes =
-      targetKB * 1024;
+    let low = 0.01;
+    let high = 1;
+    let bestDataUrl = "";
+    let bestSize = Infinity;
+    let bestQuality = 0.01;
 
-    let low = 0.05;
-    let high = 0.98;
+    for (let i = 0; i < 9; i++) {
+      const middle = (low + high) / 2;
 
-    let bestResult:
-      | {
-          dataUrl: string;
-          size: number;
+      const dataUrl = await createJPG(middle);
+      const size = getDataUrlSize(dataUrl);
+
+      if (size <= targetBytes) {
+        if (size > bestSize) {
+          // Keep searching for a result closer to the target.
         }
-      | null = null;
 
-    for (let i = 0; i < 8; i++) {
-      const currentQuality =
-        (low + high) / 2;
+        bestDataUrl = dataUrl;
+        bestSize = size;
+        bestQuality = middle;
 
-      const currentResult =
-        await createJpg(
-          currentQuality,
-          width,
-          height
-        );
-
-      bestResult = currentResult;
-
-      if (
-        currentResult.size >
-        targetBytes
-      ) {
-        high = currentQuality;
+        low = middle;
       } else {
-        low = currentQuality;
+        high = middle;
       }
     }
 
-    if (!bestResult) return;
+    if (!bestDataUrl) {
+      const smallestDataUrl = await createJPG(0.01);
+      const smallestSize = getDataUrlSize(smallestDataUrl);
 
-    setResult(bestResult.dataUrl);
-    setResultSize(bestResult.size);
+      return {
+        dataUrl: smallestDataUrl,
+        size: smallestSize,
+        quality: 0.01,
+      };
+    }
 
-    setMessage(
-      `✅ JPG created: approximately ${(
-        bestResult.size / 1024
-      ).toFixed(1)} KB`
-    );
-  };
+    return {
+      dataUrl: bestDataUrl,
+      size: bestSize,
+      quality: bestQuality,
+    };
+  }
 
-  const increaseToTarget = async () => {
-    if (!image) return;
+  async function applyTargetKB(customTarget?: number) {
+    const value =
+      customTarget !== undefined
+        ? customTarget
+        : Number(targetKB);
 
-    setMessage(
-      `Trying to create a JPG close to ${targetKB} KB...`
-    );
+    if (!Number.isFinite(value) || value <= 0) {
+      setMessage("Please enter a valid KB size.");
+      return;
+    }
 
-    const targetBytes =
-      targetKB * 1024;
+    setTargetKB(Math.round(value));
+    setMessage("Creating JPG for target KB...");
 
-    let testWidth = width;
-    let testHeight = height;
+    try {
+      const jpg = await createJpgForTargetKB(value);
 
-    let bestResult:
-      | {
-          dataUrl: string;
-          size: number;
-        }
-      | null = null;
+      setResult(jpg);
 
-    for (let i = 0; i < 8; i++) {
-      const currentResult =
-        await createJpg(
-          1,
-          testWidth,
-          testHeight
+      if (jpg.size > value * 1024) {
+        setMessage(
+          `The smallest possible JPG is about ${(jpg.size / 1024).toFixed(
+            1
+          )} KB. The image cannot be reduced to ${value} KB with JPEG quality alone.`
         );
-
-      bestResult = currentResult;
-
-      if (
-        currentResult.size >=
-        targetBytes
-      ) {
-        break;
+      } else {
+        setMessage(
+          `JPG created: ${(jpg.size / 1024).toFixed(
+            1
+          )} KB for target ${Math.round(value)} KB.`
+        );
       }
+    } catch (error) {
+      console.error(error);
 
-      testWidth = Math.round(
-        testWidth * 1.25
-      );
-
-      testHeight = Math.round(
-        testHeight * 1.25
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not create JPG."
       );
     }
+  }
 
-    if (!bestResult) return;
-
-    setResult(bestResult.dataUrl);
-    setResultSize(bestResult.size);
-
-    setMessage(
-      `✅ JPG created: approximately ${(
-        bestResult.size / 1024
-      ).toFixed(1)} KB`
+  async function decreaseKB() {
+    const newTarget = Math.max(
+      1,
+      Math.round(targetKB) - 1
     );
-  };
 
-  const downloadResult = () => {
-    if (!result) return;
+    setTargetKB(newTarget);
+    await applyTargetKB(newTarget);
+  }
 
-    const link =
-      document.createElement("a");
+  async function increaseKB() {
+    const newTarget = Math.round(targetKB) + 1;
 
-    const newName = fileName
-      ? fileName.replace(
-          /\.[^/.]+$/,
-          ""
-        )
-      : "converted-image";
+    setTargetKB(newTarget);
+    await applyTargetKB(newTarget);
+  }
 
-    link.download =
-      `${newName}.jpg`;
+  function downloadResult() {
+    if (!result) {
+      return;
+    }
 
-    link.href = result;
+    const link = document.createElement("a");
+
+    link.href = result.dataUrl;
+
+    if (mode === "merge") {
+      link.download = "merged-image.jpg";
+    } else {
+      link.download = `${fileName || "image"}.jpg`;
+    }
 
     document.body.appendChild(link);
-
     link.click();
-
     document.body.removeChild(link);
-  };
+  }
 
-  const resetImage = () => {
+  function resetImage() {
     setImage(null);
+    setImages([]);
+    setSelectedImageId(null);
     setShowCropper(false);
-
-    setFileName("");
-
-    setOriginalWidth(0);
-    setOriginalHeight(0);
-    setOriginalSize(0);
-
+    setResult(null);
+    setMessage("");
+    setFileName("image");
     setWidth(0);
     setHeight(0);
-
     setTargetKB(100);
     setQuality(0.92);
+    setGap(0);
+    setMergeDirection("vertical");
+  }
 
+  function handleWidthChange(value: string) {
+    const number = Number(value);
+
+    if (!Number.isFinite(number)) {
+      setWidth(0);
+      return;
+    }
+
+    setWidth(Math.max(0, Math.round(number)));
     setResult(null);
-    setResultSize(0);
-    setMessage("");
-  };
+  }
+
+  function handleHeightChange(value: string) {
+    const number = Number(value);
+
+    if (!Number.isFinite(number)) {
+      setHeight(0);
+      return;
+    }
+
+    setHeight(Math.max(0, Math.round(number)));
+    setResult(null);
+  }
+
+  function handleGapChange(value: string) {
+    const number = Number(value);
+
+    if (!Number.isFinite(number)) {
+      setGap(0);
+      return;
+    }
+
+    const newGap = Math.max(0, Math.round(number));
+
+    setGap(newGap);
+    setResult(null);
+
+    if (mode === "merge") {
+      updateMergeDimensions(images, mergeDirection, newGap);
+    }
+  }
+
+  function handleDirectionChange(
+    direction: "vertical" | "horizontal"
+  ) {
+    setMergeDirection(direction);
+    setResult(null);
+
+    if (images.length > 0) {
+      updateMergeDimensions(images, direction, gap);
+    }
+  }
+
+  const selectedImage = images.find(
+    (item) => item.id === selectedImageId
+  );
 
   return (
     <main
       style={{
-        maxWidth: "900px",
-        margin: "40px auto",
-        padding: "20px",
+        minHeight: "100vh",
+        padding: "30px 16px",
+        background: "#f5f7fb",
       }}
     >
-      {showCropper &&
-        image && (
-          <ImageCropper
-            image={image}
-            onCrop={handleCrop}
-            onCancel={() =>
-              setShowCropper(false)
-            }
-          />
-        )}
-
       <div
         style={{
-          background: "white",
-          borderRadius: "20px",
-          padding: "35px",
-          boxShadow:
-            "0 10px 30px rgba(0,0,0,0.08)",
+          maxWidth: "900px",
+          margin: "0 auto",
+          background: "#ffffff",
+          borderRadius: "16px",
+          padding: "24px",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
         }}
       >
-        <div
+        <h1
           style={{
             textAlign: "center",
-            marginBottom: "30px",
+            marginBottom: "10px",
           }}
         >
-          <div
-            style={{
-              fontSize: "55px",
-              marginBottom: "10px",
-            }}
-          >
-            🖼️
-          </div>
+          Image to JPG
+        </h1>
 
-          <h1
-            style={{
-              margin: 0,
-              color: "#1e3a8a",
-              fontSize: "36px",
-            }}
-          >
-            Image to JPG / JPEG
-          </h1>
+        <p
+          style={{
+            textAlign: "center",
+            color: "#666",
+            marginBottom: "24px",
+          }}
+        >
+          Convert images to JPG, resize, crop, compress, or merge multiple
+          images into one JPG.
+        </p>
 
-          <p
+        <div
+          style={{
+            display: "flex",
+            gap: "10px",
+            justifyContent: "center",
+            marginBottom: "25px",
+            flexWrap: "wrap",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => handleModeChange("single")}
             style={{
-              color: "#666",
-              fontSize: "17px",
+              padding: "10px 18px",
+              borderRadius: "8px",
+              border: "1px solid #2563eb",
+              background:
+                mode === "single" ? "#2563eb" : "#ffffff",
+              color: mode === "single" ? "#ffffff" : "#2563eb",
+              cursor: "pointer",
+              fontWeight: 600,
             }}
           >
-            Convert your image to JPG with
-            framing crop and size control.
-          </p>
+            Single Image
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleModeChange("merge")}
+            style={{
+              padding: "10px 18px",
+              borderRadius: "8px",
+              border: "1px solid #2563eb",
+              background:
+                mode === "merge" ? "#2563eb" : "#ffffff",
+              color: mode === "merge" ? "#ffffff" : "#2563eb",
+              cursor: "pointer",
+              fontWeight: 600,
+            }}
+          >
+            Merge Images
+          </button>
         </div>
 
-        {!image && (
-          <label
-            style={{
-              display: "block",
-              border:
-                "2px dashed #2563eb",
-              borderRadius: "16px",
-              padding:
-                "45px 20px",
-              textAlign: "center",
-              cursor: "pointer",
-              background: "#eff6ff",
-            }}
-          >
-            <div
-              style={{
-                fontSize: "45px",
-              }}
-            >
-              📤
-            </div>
-
-            <h2
-              style={{
-                margin:
-                  "0 0 8px",
-                color: "#1e40af",
-              }}
-            >
-              Choose an Image
-            </h2>
-
-            <p>
-              Upload an image and
-              crop it using the
-              framing controls.
-            </p>
-
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleFile}
-              style={{
-                display: "none",
-              }}
-            />
-          </label>
-        )}
-
-        {image && (
+        {mode === "single" && (
           <>
-            <div
-              style={{
-                background:
-                  "#f8fafc",
-                borderRadius: "14px",
-                padding: "18px",
-                marginBottom:
-                  "25px",
-              }}
-            >
-              <h3>
-                📊 Image Information
-              </h3>
+            {!image && (
+              <div
+                style={{
+                  border: "2px dashed #2563eb",
+                  borderRadius: "12px",
+                  padding: "30px",
+                  textAlign: "center",
+                  marginBottom: "20px",
+                }}
+              >
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
 
-              <p>
-                <strong>
-                  File:
-                </strong>{" "}
-                {fileName ||
-                  "Cropped image"}
-              </p>
+                    if (file) {
+                      handleSingleFile(file);
+                    }
+                  }}
+                />
 
-              <p>
-                <strong>
-                  Original Dimensions:
-                </strong>{" "}
-                {originalWidth} ×{" "}
-                {originalHeight} px
-              </p>
+                <p
+                  style={{
+                    marginTop: "12px",
+                    color: "#666",
+                  }}
+                >
+                  Select an image to convert to JPG.
+                </p>
+              </div>
+            )}
 
-              <p>
-                <strong>
-                  Current Dimensions:
-                </strong>{" "}
-                {width} × {height} px
-              </p>
-
-              <p>
-                <strong>
-                  Original File Size:
-                </strong>{" "}
-                {(originalSize /
-                  1024).toFixed(2)}{" "}
-                KB
-              </p>
-            </div>
-
-            {!showCropper && (
-              <>
+            {image && !showCropper && (
+              <div>
                 <div
                   style={{
-                    textAlign:
-                      "center",
-                    marginBottom:
-                      "20px",
+                    textAlign: "center",
+                    marginBottom: "20px",
                   }}
                 >
                   <img
                     src={image}
                     alt="Selected image"
                     style={{
-                      maxWidth:
-                        "100%",
-                      maxHeight:
-                        "350px",
-                      borderRadius:
-                        "12px",
+                      maxWidth: "100%",
+                      maxHeight: "400px",
+                      borderRadius: "10px",
+                      border: "1px solid #ddd",
                     }}
                   />
                 </div>
 
-                <button
-                  onClick={() =>
-                    setShowCropper(
-                      true
-                    )
-                  }
-                  style={{
-                    width: "100%",
-                    padding: "14px",
-                    background:
-                      "#7c3aed",
-                    color: "white",
-                    border: "none",
-                    borderRadius:
-                      "10px",
-                    fontWeight:
-                      "bold",
-                    cursor:
-                      "pointer",
-                    marginBottom:
-                      "20px",
-                  }}
-                >
-                  ✂️ Crop Image Again
-                </button>
-
                 <div
                   style={{
-                    padding: "20px",
-                    background:
-                      "#f5f7fb",
-                    borderRadius:
-                      "10px",
-                    marginTop:
-                      "20px",
+                    display: "flex",
+                    gap: "10px",
+                    justifyContent: "center",
+                    flexWrap: "wrap",
+                    marginBottom: "20px",
                   }}
                 >
-                  <h2>
-                    📐 Resize Image
-                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setShowCropper(true)}
+                    style={{
+                      padding: "10px 16px",
+                      border: "none",
+                      borderRadius: "8px",
+                      background: "#f59e0b",
+                      color: "#ffffff",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Crop Image
+                  </button>
 
-                  <p>
-                    Current:{" "}
-                    {width} ×{" "}
-                    {height} px
-                  </p>
-
-                  <label>
-                    Width:
+                  <label
+                    style={{
+                      padding: "10px 16px",
+                      borderRadius: "8px",
+                      background: "#e5e7eb",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Add Different Image
                     <input
-                      type="number"
-                      min="1"
-                      value={width}
-                      onChange={(
-                        e
-                      ) =>
-                        setWidth(
-                          Number(
-                            e.target
-                              .value
-                          )
-                        )
-                      }
-                      style={{
-                        width:
-                          "100%",
-                        padding:
-                          "10px",
-                        marginTop:
-                          "5px",
-                        marginBottom:
-                          "15px",
-                        boxSizing:
-                          "border-box",
-                      }}
-                    />
-                  </label>
+                      type="file"
+                      accept="image/*"
+                      style={{ display: "none" }}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
 
-                  <label>
-                    Height:
-                    <input
-                      type="number"
-                      min="1"
-                      value={height}
-                      onChange={(
-                        e
-                      ) =>
-                        setHeight(
-                          Number(
-                            e.target
-                              .value
-                          )
-                        )
-                      }
-                      style={{
-                        width:
-                          "100%",
-                        padding:
-                          "10px",
-                        marginTop:
-                          "5px",
-                        boxSizing:
-                          "border-box",
+                        if (file) {
+                          handleSingleFile(file);
+                        }
                       }}
                     />
                   </label>
                 </div>
-
-                <div
-                  style={{
-                    padding: "20px",
-                    background:
-                      "#f5f7fb",
-                    borderRadius:
-                      "10px",
-                    marginTop:
-                      "20px",
-                  }}
-                >
-                  <h2>
-                    🎯 Target File
-                    Size
-                  </h2>
-
-                  <label>
-                    Target size in KB:
-
-                    <input
-                      type="number"
-                      min="1"
-                      value={targetKB}
-                      onChange={(
-                        e
-                      ) =>
-                        setTargetKB(
-                          Number(
-                            e.target
-                              .value
-                          )
-                        )
-                      }
-                      style={{
-                        width:
-                          "100%",
-                        padding:
-                          "10px",
-                        marginTop:
-                          "5px",
-                        boxSizing:
-                          "border-box",
-                      }}
-                    />
-                  </label>
-
-                  <div
-                    style={{
-                      display:
-                        "grid",
-                      gridTemplateColumns:
-                        "1fr 1fr",
-                      gap: "10px",
-                      marginTop:
-                        "20px",
-                    }}
-                  >
-                    <button
-                      onClick={
-                        reduceToTarget
-                      }
-                      style={{
-                        padding:
-                          "14px",
-                        background:
-                          "#dc2626",
-                        color:
-                          "white",
-                        border:
-                          "none",
-                        borderRadius:
-                          "8px",
-                        fontWeight:
-                          "bold",
-                        cursor:
-                          "pointer",
-                      }}
-                    >
-                      📉 Reduce
-                      to KB
-                    </button>
-
-                    <button
-                      onClick={
-                        increaseToTarget
-                      }
-                      style={{
-                        padding:
-                          "14px",
-                        background:
-                          "#16a34a",
-                        color:
-                          "white",
-                        border:
-                          "none",
-                        borderRadius:
-                          "8px",
-                        fontWeight:
-                          "bold",
-                        cursor:
-                          "pointer",
-                      }}
-                    >
-                      📈 Increase
-                      to KB
-                    </button>
-                  </div>
-                </div>
-
-                <button
-                  onClick={
-                    convertNormal
-                  }
-                  style={{
-                    width:
-                      "100%",
-                    padding:
-                      "16px",
-                    marginTop:
-                      "20px",
-                    background:
-                      "#2563eb",
-                    color:
-                      "white",
-                    border:
-                      "none",
-                    borderRadius:
-                      "10px",
-                    fontSize:
-                      "18px",
-                    fontWeight:
-                      "bold",
-                    cursor:
-                      "pointer",
-                  }}
-                >
-                  🔄 Convert to
-                  JPG / JPEG
-                </button>
-
-                {message && (
-                  <p
-                    style={{
-                      textAlign:
-                        "center",
-                      marginTop:
-                        "20px",
-                      fontWeight:
-                        "bold",
-                    }}
-                  >
-                    {message}
-                  </p>
-                )}
-
-                {result && (
-                  <div
-                    style={{
-                      marginTop:
-                        "30px",
-                      paddingTop:
-                        "25px",
-                      borderTop:
-                        "1px solid #ddd",
-                      textAlign:
-                        "center",
-                    }}
-                  >
-                    <h2>
-                      ✨ JPG Result
-                    </h2>
-
-                    <p>
-                      Output size:{" "}
-                      <strong>
-                        {(
-                          resultSize /
-                          1024
-                        ).toFixed(
-                          1
-                        )}{" "}
-                        KB
-                      </strong>
-                    </p>
-
-                    <img
-                      src={result}
-                      alt="JPG result"
-                      style={{
-                        display:
-                          "block",
-                        maxWidth:
-                          "100%",
-                        maxHeight:
-                          "400px",
-                        margin:
-                          "20px auto",
-                        borderRadius:
-                          "10px",
-                      }}
-                    />
-
-                    <button
-                      onClick={
-                        downloadResult
-                      }
-                      style={{
-                        width:
-                          "100%",
-                        padding:
-                          "16px",
-                        background:
-                          "#16a34a",
-                        color:
-                          "white",
-                        border:
-                          "none",
-                        borderRadius:
-                          "10px",
-                        fontSize:
-                          "18px",
-                        fontWeight:
-                          "bold",
-                        cursor:
-                          "pointer",
-                      }}
-                    >
-                      📥 Download JPG
-                    </button>
-                  </div>
-                )}
-
-                <button
-                  onClick={
-                    resetImage
-                  }
-                  style={{
-                    width:
-                      "100%",
-                    padding:
-                      "13px",
-                    background:
-                      "#f1f5f9",
-                    border:
-                      "none",
-                    borderRadius:
-                      "10px",
-                    cursor:
-                      "pointer",
-                    marginTop:
-                      "12px",
-                  }}
-                >
-                  🔄 Choose Another
-                  Image
-                </button>
-              </>
+              </div>
             )}
           </>
+        )}
+
+        {mode === "merge" && (
+          <div>
+            <div
+              style={{
+                border: "2px dashed #2563eb",
+                borderRadius: "12px",
+                padding: "25px",
+                textAlign: "center",
+                marginBottom: "20px",
+              }}
+            >
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={(event) => {
+                  handleMultipleFiles(event.target.files);
+                  event.target.value = "";
+                }}
+              />
+
+              <p
+                style={{
+                  marginTop: "12px",
+                  color: "#666",
+                }}
+              >
+                Select multiple images to merge into one JPG.
+              </p>
+            </div>
+
+            {images.length > 0 && (
+              <div
+                style={{
+                  marginBottom: "25px",
+                }}
+              >
+                <h3 style={{ marginBottom: "12px" }}>
+                  Selected Images ({images.length})
+                </h3>
+
+                {images.map((item, index) => (
+                  <div
+                    key={item.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                      padding: "12px",
+                      marginBottom: "10px",
+                      border: "1px solid #ddd",
+                      borderRadius: "10px",
+                      background: "#fafafa",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <img
+                      src={item.image}
+                      alt={item.fileName}
+                      style={{
+                        width: "80px",
+                        height: "80px",
+                        objectFit: "cover",
+                        borderRadius: "8px",
+                        border: "1px solid #ddd",
+                      }}
+                    />
+
+                    <div
+                      style={{
+                        flex: 1,
+                        minWidth: "180px",
+                      }}
+                    >
+                      <strong>{item.fileName}</strong>
+
+                      <div
+                        style={{
+                          color: "#666",
+                          fontSize: "13px",
+                          marginTop: "4px",
+                        }}
+                      >
+                        {item.width} × {item.height}px
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "6px",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => moveImage(index, "up")}
+                        disabled={index === 0}
+                        style={{
+                          padding: "7px 10px",
+                          border: "1px solid #ddd",
+                          borderRadius: "6px",
+                          background: "#ffffff",
+                          cursor:
+                            index === 0
+                              ? "not-allowed"
+                              : "pointer",
+                        }}
+                      >
+                        ↑
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => moveImage(index, "down")}
+                        disabled={index === images.length - 1}
+                        style={{
+                          padding: "7px 10px",
+                          border: "1px solid #ddd",
+                          borderRadius: "6px",
+                          background: "#ffffff",
+                          cursor:
+                            index === images.length - 1
+                              ? "not-allowed"
+                              : "pointer",
+                        }}
+                      >
+                        ↓
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => openCropper(item.id)}
+                        style={{
+                          padding: "7px 10px",
+                          border: "none",
+                          borderRadius: "6px",
+                          background: "#f59e0b",
+                          color: "#ffffff",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Crop
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => removeImage(item.id)}
+                        style={{
+                          padding: "7px 10px",
+                          border: "none",
+                          borderRadius: "6px",
+                          background: "#dc2626",
+                          color: "#ffffff",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {showCropper && selectedImage && (
+          <div
+            style={{
+              marginBottom: "25px",
+            }}
+          >
+            <ImageCropper
+              image={selectedImage.image}
+              onCrop={handleCrop}
+              onCancel={() => {
+                setShowCropper(false);
+                setSelectedImageId(null);
+              }}
+            />
+          </div>
+        )}
+
+        {!showCropper && (image || images.length > 0) && (
+          <>
+            {mode === "merge" && images.length > 0 && (
+              <div
+                style={{
+                  padding: "18px",
+                  background: "#f8fafc",
+                  borderRadius: "10px",
+                  marginBottom: "20px",
+                }}
+              >
+                <h3 style={{ marginBottom: "15px" }}>
+                  Merge Settings
+                </h3>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: "15px",
+                  }}
+                >
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        marginBottom: "6px",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Direction
+                    </label>
+
+                    <select
+                      value={mergeDirection}
+                      onChange={(event) =>
+                        handleDirectionChange(
+                          event.target.value as
+                            | "vertical"
+                            | "horizontal"
+                        )
+                      }
+                      style={{
+                        width: "100%",
+                        padding: "10px",
+                        borderRadius: "7px",
+                        border: "1px solid #ccc",
+                      }}
+                    >
+                      <option value="vertical">
+                        Vertical
+                      </option>
+                      <option value="horizontal">
+                        Horizontal
+                      </option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        marginBottom: "6px",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Gap (px)
+                    </label>
+
+                    <input
+                      type="number"
+                      min="0"
+                      value={gap}
+                      onChange={(event) =>
+                        handleGapChange(event.target.value)
+                      }
+                      style={{
+                        width: "100%",
+                        padding: "10px",
+                        borderRadius: "7px",
+                        border: "1px solid #ccc",
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div
+              style={{
+                padding: "18px",
+                background: "#f8fafc",
+                borderRadius: "10px",
+                marginBottom: "20px",
+              }}
+            >
+              <h3 style={{ marginBottom: "15px" }}>
+                Output Size
+              </h3>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns:
+                    "repeat(auto-fit, minmax(180px, 1fr))",
+                  gap: "15px",
+                }}
+              >
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      marginBottom: "6px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Width (px)
+                  </label>
+
+                  <input
+                    type="number"
+                    min="1"
+                    value={width || ""}
+                    onChange={(event) =>
+                      handleWidthChange(event.target.value)
+                    }
+                    style={{
+                      width: "100%",
+                      padding: "10px",
+                      borderRadius: "7px",
+                      border: "1px solid #ccc",
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      marginBottom: "6px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Height (px)
+                  </label>
+
+                  <input
+                    type="number"
+                    min="1"
+                    value={height || ""}
+                    onChange={(event) =>
+                      handleHeightChange(event.target.value)
+                    }
+                    style={{
+                      width: "100%",
+                      padding: "10px",
+                      borderRadius: "7px",
+                      border: "1px solid #ccc",
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                padding: "18px",
+                background: "#f8fafc",
+                borderRadius: "10px",
+                marginBottom: "20px",
+              }}
+            >
+              <h3 style={{ marginBottom: "15px" }}>
+                JPG Size
+              </h3>
+
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "6px",
+                  fontWeight: 600,
+                }}
+              >
+                Target Size (KB)
+              </label>
+
+              <input
+                type="number"
+                min="1"
+                value={targetKB}
+                onChange={(event) => {
+                  const value = Number(event.target.value);
+
+                  if (Number.isFinite(value) && value > 0) {
+                    setTargetKB(Math.round(value));
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    applyTargetKB();
+                  }
+                }}
+                style={{
+                  width: "100%",
+                  maxWidth: "250px",
+                  padding: "10px",
+                  borderRadius: "7px",
+                  border: "1px solid #ccc",
+                  marginBottom: "12px",
+                }}
+              />
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: "8px",
+                  flexWrap: "wrap",
+                  marginBottom: "15px",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={decreaseKB}
+                  style={{
+                    padding: "9px 14px",
+                    border: "1px solid #ccc",
+                    borderRadius: "7px",
+                    background: "#ffffff",
+                    cursor: "pointer",
+                  }}
+                >
+                  -1 KB
+                </button>
+
+                <button
+                  type="button"
+                  onClick={increaseKB}
+                  style={{
+                    padding: "9px 14px",
+                    border: "1px solid #ccc",
+                    borderRadius: "7px",
+                    background: "#ffffff",
+                    cursor: "pointer",
+                  }}
+                >
+                  +1 KB
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => applyTargetKB()}
+                  style={{
+                    padding: "9px 16px",
+                    border: "none",
+                    borderRadius: "7px",
+                    background: "#7c3aed",
+                    color: "#ffffff",
+                    cursor: "pointer",
+                    fontWeight: 600,
+                  }}
+                >
+                  Apply KB Size
+                </button>
+              </div>
+
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "6px",
+                  fontWeight: 600,
+                }}
+              >
+                JPG Quality
+              </label>
+
+              <input
+                type="range"
+                min="0.1"
+                max="1"
+                step="0.01"
+                value={quality}
+                onChange={(event) => {
+                  setQuality(Number(event.target.value));
+                  setResult(null);
+                }}
+                style={{
+                  width: "100%",
+                  maxWidth: "400px",
+                }}
+              />
+
+              <div
+                style={{
+                  marginTop: "5px",
+                  color: "#666",
+                }}
+              >
+                Quality: {Math.round(quality * 100)}%
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                justifyContent: "center",
+                flexWrap: "wrap",
+                marginBottom: "20px",
+              }}
+            >
+              <button
+                type="button"
+                onClick={convertNormal}
+                style={{
+                  padding: "12px 20px",
+                  border: "none",
+                  borderRadius: "8px",
+                  background: "#2563eb",
+                  color: "#ffffff",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                Convert to JPG
+              </button>
+
+              <button
+                type="button"
+                onClick={() => applyTargetKB()}
+                style={{
+                  padding: "12px 20px",
+                  border: "none",
+                  borderRadius: "8px",
+                  background: "#16a34a",
+                  color: "#ffffff",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                Create Target KB JPG
+              </button>
+
+              <button
+                type="button"
+                onClick={resetImage}
+                style={{
+                  padding: "12px 20px",
+                  border: "none",
+                  borderRadius: "8px",
+                  background: "#6b7280",
+                  color: "#ffffff",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                Start Again
+              </button>
+            </div>
+          </>
+        )}
+
+        {message && (
+          <div
+            style={{
+              padding: "12px",
+              borderRadius: "8px",
+              background: "#eff6ff",
+              color: "#1e40af",
+              textAlign: "center",
+              marginBottom: "20px",
+            }}
+          >
+            {message}
+          </div>
+        )}
+
+        {result && (
+          <div
+            style={{
+              marginTop: "25px",
+              padding: "20px",
+              border: "1px solid #d1d5db",
+              borderRadius: "12px",
+              background: "#ffffff",
+            }}
+          >
+            <h2
+              style={{
+                textAlign: "center",
+                marginBottom: "15px",
+              }}
+            >
+              JPG Result
+            </h2>
+
+            <div
+              style={{
+                textAlign: "center",
+                marginBottom: "15px",
+              }}
+            >
+              <img
+                src={result.dataUrl}
+                alt="JPG result"
+                style={{
+                  maxWidth: "100%",
+                  maxHeight: "450px",
+                  borderRadius: "8px",
+                  border: "1px solid #ddd",
+                }}
+              />
+            </div>
+
+            <div
+              style={{
+                textAlign: "center",
+                color: "#555",
+                marginBottom: "15px",
+              }}
+            >
+              <div>
+                Size: {(result.size / 1024).toFixed(1)} KB
+              </div>
+
+              <div>
+                Quality: {Math.round(result.quality * 100)}%
+              </div>
+
+              <div>
+                Dimensions: {width} × {height}px
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                gap: "10px",
+                flexWrap: "wrap",
+              }}
+            >
+              <button
+                type="button"
+                onClick={downloadResult}
+                style={{
+                  padding: "12px 22px",
+                  border: "none",
+                  borderRadius: "8px",
+                  background: "#16a34a",
+                  color: "#ffffff",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                Download JPG
+              </button>
+
+              <button
+                type="button"
+                onClick={() => applyTargetKB()}
+                style={{
+                  padding: "12px 22px",
+                  border: "none",
+                  borderRadius: "8px",
+                  background: "#7c3aed",
+                  color: "#ffffff",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                Apply Different KB
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </main>
