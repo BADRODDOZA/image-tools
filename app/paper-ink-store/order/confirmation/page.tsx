@@ -1,8 +1,9 @@
+
 "use client";
 
 import Link from "next/link";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
 
 type Order = {
   id: string;
@@ -37,21 +38,13 @@ type OrderResponse = {
   error?: string;
 };
 
-export default function OrderConfirmationPage() {
+function OrderConfirmationContent() {
   const searchParams = useSearchParams();
-
   const orderId = searchParams.get("orderId");
 
-  const [order, setOrder] = useState<Order | null>(
-    null
-  );
-
-  const [items, setItems] = useState<OrderItem[]>(
-    []
-  );
-
+  const [order, setOrder] = useState<Order | null>(null);
+  const [items, setItems] = useState<OrderItem[]>([]);
   const [loading, setLoading] = useState(true);
-
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -82,18 +75,13 @@ export default function OrderConfirmationPage() {
       try {
         result = await response.json();
       } catch {
-        setError(
-          "The server returned an invalid response."
-        );
+        setError("The server returned an invalid response.");
         setLoading(false);
         return;
       }
 
       if (!response.ok || !result.success) {
-        setError(
-          result.error ||
-            "Could not load your order."
-        );
+        setError(result.error || "Could not load your order.");
         setLoading(false);
         return;
       }
@@ -107,40 +95,22 @@ export default function OrderConfirmationPage() {
       setOrder(result.order);
       setItems(result.items || []);
 
-      /*
-       * Payment information is already saved
-       * in sessionStorage after successful
-       * Razorpay payment.
-       *
-       * Clear the cart only after the order
-       * has successfully loaded.
-       */
+      // Clear cart only after order loads successfully.
       localStorage.removeItem("paperInkCart");
 
-      window.dispatchEvent(
-        new Event("paperInkCartUpdated")
-      );
+      window.dispatchEvent(new Event("paperInkCartUpdated"));
 
       setLoading(false);
     } catch (err) {
-      console.error(
-        "Order confirmation error:",
-        err
-      );
-
-      setError(
-        "Something went wrong while loading your order."
-      );
-
+      console.error("Order confirmation error:", err);
+      setError("Something went wrong while loading your order.");
       setLoading(false);
     }
   }
 
   function formatDate(dateString: string) {
     try {
-      return new Date(
-        dateString
-      ).toLocaleString("en-IN", {
+      return new Date(dateString).toLocaleString("en-IN", {
         dateStyle: "medium",
         timeStyle: "short",
       });
@@ -150,15 +120,9 @@ export default function OrderConfirmationPage() {
   }
 
   function getPaymentStatus() {
-    if (!order) {
-      return "Pending";
-    }
+    if (!order) return "Pending";
 
-    if (
-      order.payment_status &&
-      order.payment_status.toLowerCase() ===
-        "paid"
-    ) {
+    if (order.payment_status?.toLowerCase() === "paid") {
       return "Paid";
     }
 
@@ -170,65 +134,31 @@ export default function OrderConfirmationPage() {
   }
 
   function getPaymentColor() {
-    const status =
-      getPaymentStatus().toLowerCase();
+    const status = getPaymentStatus().toLowerCase();
 
-    if (status === "paid") {
-      return "#166534";
-    }
-
-    if (status === "failed") {
-      return "#b91c1c";
-    }
+    if (status === "paid") return "#166534";
+    if (status === "failed") return "#b91c1c";
 
     return "#92400e";
   }
 
   function getPaymentBackground() {
-    const status =
-      getPaymentStatus().toLowerCase();
+    const status = getPaymentStatus().toLowerCase();
 
-    if (status === "paid") {
-      return "#dcfce7";
-    }
-
-    if (status === "failed") {
-      return "#fee2e2";
-    }
+    if (status === "paid") return "#dcfce7";
+    if (status === "failed") return "#fee2e2";
 
     return "#fef3c7";
   }
 
   function getOrderStatusColor() {
-    if (!order) {
-      return "#92400e";
-    }
+    if (!order) return "#92400e";
 
-    const status =
-      order.status.toLowerCase();
+    const status = order.status.toLowerCase();
 
-    if (
-      status === "completed"
-    ) {
-      return "#166534";
-    }
-
-    if (
-      status === "shipped"
-    ) {
-      return "#1d4ed8";
-    }
-
-    if (
-      status === "processing"
-    ) {
-      return "#92400e";
-    }
-
-    if (
-      status === "cancelled" ||
-      status === "rejected"
-    ) {
+    if (status === "completed") return "#166534";
+    if (status === "shipped") return "#1d4ed8";
+    if (status === "cancelled" || status === "rejected") {
       return "#b91c1c";
     }
 
@@ -236,29 +166,13 @@ export default function OrderConfirmationPage() {
   }
 
   function getOrderStatusBackground() {
-    if (!order) {
-      return "#fef3c7";
-    }
+    if (!order) return "#fef3c7";
 
-    const status =
-      order.status.toLowerCase();
+    const status = order.status.toLowerCase();
 
-    if (
-      status === "completed"
-    ) {
-      return "#dcfce7";
-    }
-
-    if (
-      status === "shipped"
-    ) {
-      return "#dbeafe";
-    }
-
-    if (
-      status === "cancelled" ||
-      status === "rejected"
-    ) {
+    if (status === "completed") return "#dcfce7";
+    if (status === "shipped") return "#dbeafe";
+    if (status === "cancelled" || status === "rejected") {
       return "#fee2e2";
     }
 
@@ -269,28 +183,15 @@ export default function OrderConfirmationPage() {
     return (
       <main className="confirmation-page">
         <div className="confirmation-card loading-card">
-          <div className="loading-icon">
-            ⏳
-          </div>
-
-          <h1>
-            Loading your order...
-          </h1>
-
-          <p>
-            Please wait while we retrieve
-            your order details.
-          </p>
+          <div className="loading-icon">⏳</div>
+          <h1>Loading your order...</h1>
+          <p>Please wait while we retrieve your order details.</p>
         </div>
 
         <style jsx>{`
           .confirmation-page {
             min-height: 100vh;
-            background: linear-gradient(
-              135deg,
-              #eef4ff,
-              #f8fbff
-            );
+            background: linear-gradient(135deg, #eef4ff, #f8fbff);
             padding: 50px 20px;
             display: flex;
             justify-content: center;
@@ -304,8 +205,7 @@ export default function OrderConfirmationPage() {
             border-radius: 18px;
             padding: 45px 25px;
             text-align: center;
-            box-shadow:
-              0 8px 30px rgba(0, 0, 0, 0.08);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
           }
 
           .loading-icon {
@@ -342,31 +242,16 @@ export default function OrderConfirmationPage() {
     return (
       <main className="confirmation-page">
         <div className="confirmation-card error-card">
-          <div className="error-icon">
-            ❌
-          </div>
-
-          <h1>
-            Order Not Found
-          </h1>
-
-          <p>
-            {error ||
-              "We could not find this order."}
-          </p>
+          <div className="error-icon">❌</div>
+          <h1>Order Not Found</h1>
+          <p>{error || "We could not find this order."}</p>
 
           <div className="button-row">
-            <Link
-              href="/paper-ink-store"
-              className="primary-button"
-            >
+            <Link href="/paper-ink-store" className="primary-button">
               🛒 Shop Now
             </Link>
 
-            <Link
-              href="/"
-              className="secondary-button"
-            >
+            <Link href="/" className="secondary-button">
               🏠 Home
             </Link>
           </div>
@@ -375,11 +260,7 @@ export default function OrderConfirmationPage() {
         <style jsx>{`
           .confirmation-page {
             min-height: 100vh;
-            background: linear-gradient(
-              135deg,
-              #eef4ff,
-              #f8fbff
-            );
+            background: linear-gradient(135deg, #eef4ff, #f8fbff);
             padding: 50px 20px;
             display: flex;
             justify-content: center;
@@ -393,8 +274,7 @@ export default function OrderConfirmationPage() {
             border-radius: 18px;
             padding: 45px 25px;
             text-align: center;
-            box-shadow:
-              0 8px 30px rgba(0, 0, 0, 0.08);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
           }
 
           .error-icon {
@@ -463,64 +343,40 @@ export default function OrderConfirmationPage() {
     );
   }
 
-  const paymentStatus =
-    getPaymentStatus();
+  const paymentStatus = getPaymentStatus();
 
   return (
     <main className="confirmation-page">
       <div className="confirmation-container">
-
-        {/* SUCCESS HEADER */}
-
         <section className="success-card">
-          <div className="success-icon">
-            ✓
-          </div>
+          <div className="success-icon">✓</div>
 
-          <h1>
-            Order Confirmed!
-          </h1>
+          <h1>Order Confirmed!</h1>
 
           <p className="success-message">
-            Thank you for your order.
-            Your A4 paper and printer
-            ink order has been received.
+            Thank you for your order. Your A4 paper and printer ink
+            order has been received.
           </p>
 
           <div className="order-id-box">
-            <span>
-              Order ID
-            </span>
-
-            <strong>
-              {order.id}
-            </strong>
+            <span>Order ID</span>
+            <strong>{order.id}</strong>
           </div>
 
           <p className="order-date">
-            Ordered on{" "}
-            {formatDate(
-              order.created_at
-            )}
+            Ordered on {formatDate(order.created_at)}
           </p>
         </section>
 
-        {/* PAYMENT + ORDER STATUS */}
-
         <section className="status-grid">
-
           <div className="info-card">
-            <h2>
-              💳 Payment
-            </h2>
+            <h2>💳 Payment</h2>
 
             <div
               className="status-badge"
               style={{
-                background:
-                  getPaymentBackground(),
-                color:
-                  getPaymentColor(),
+                background: getPaymentBackground(),
+                color: getPaymentColor(),
               }}
             >
               {paymentStatus}
@@ -528,249 +384,137 @@ export default function OrderConfirmationPage() {
 
             {order.razorpay_payment_id && (
               <div className="small-info">
-                <span>
-                  Payment ID
-                </span>
-
-                <strong>
-                  {
-                    order.razorpay_payment_id
-                  }
-                </strong>
+                <span>Payment ID</span>
+                <strong>{order.razorpay_payment_id}</strong>
               </div>
             )}
           </div>
 
           <div className="info-card">
-            <h2>
-              📦 Order Status
-            </h2>
+            <h2>📦 Order Status</h2>
 
             <div
               className="status-badge"
               style={{
-                background:
-                  getOrderStatusBackground(),
-                color:
-                  getOrderStatusColor(),
+                background: getOrderStatusBackground(),
+                color: getOrderStatusColor(),
               }}
             >
-              {order.status ||
-                "Pending"}
+              {order.status || "Pending"}
             </div>
           </div>
-
         </section>
 
-        {/* CUSTOMER DETAILS */}
-
         <section className="content-card">
-          <h2>
-            👤 Customer Details
-          </h2>
+          <h2>👤 Customer Details</h2>
 
           <div className="details-grid">
             <div>
-              <span>
-                Full Name
-              </span>
-
-              <strong>
-                {order.customer_name}
-              </strong>
+              <span>Full Name</span>
+              <strong>{order.customer_name}</strong>
             </div>
 
             <div>
-              <span>
-                Mobile
-              </span>
-
-              <strong>
-                {order.mobile}
-              </strong>
+              <span>Mobile</span>
+              <strong>{order.mobile}</strong>
             </div>
           </div>
         </section>
 
-        {/* DELIVERY ADDRESS */}
-
         <section className="content-card">
-          <h2>
-            🚚 Delivery Address
-          </h2>
+          <h2>🚚 Delivery Address</h2>
 
           <div className="address-box">
-            <strong>
-              {order.customer_name}
-            </strong>
-
-            <p>
-              {order.address}
-            </p>
+            <strong>{order.customer_name}</strong>
+            <p>{order.address}</p>
 
             {order.landmark && (
               <p>
-                <strong>
-                  Landmark:
-                </strong>{" "}
-                {order.landmark}
+                <strong>Landmark:</strong> {order.landmark}
               </p>
             )}
 
             <p>
-              {order.city},{" "}
-              {order.state}
+              {order.city}, {order.state}
             </p>
 
-            <p>
-              PIN Code:{" "}
-              {order.pin_code}
-            </p>
-
-            <p>
-              Mobile:{" "}
-              {order.mobile}
-            </p>
+            <p>PIN Code: {order.pin_code}</p>
+            <p>Mobile: {order.mobile}</p>
           </div>
         </section>
 
-        {/* ORDER ITEMS */}
-
         <section className="content-card">
-          <h2>
-            🛒 Ordered Items
-          </h2>
+          <h2>🛒 Ordered Items</h2>
 
           {items.length === 0 ? (
             <p className="empty-items">
-              No item details were found
-              for this order.
+              No item details were found for this order.
             </p>
           ) : (
             <div className="items-list">
-              {items.map(
-                (item, index) => (
-                  <div
-                    key={
-                      item.id ||
-                      `${item.product_id}-${index}`
-                    }
-                    className="order-item"
-                  >
-                    <div className="item-number">
-                      {index + 1}
-                    </div>
+              {items.map((item, index) => (
+                <div
+                  key={item.id || `${item.product_id}-${index}`}
+                  className="order-item"
+                >
+                  <div className="item-number">{index + 1}</div>
 
-                    <div className="item-details">
-                      <strong>
-                        {
-                          item.product_name
-                        }
-                      </strong>
-
-                      <span>
-                        Quantity:{" "}
-                        {
-                          item.quantity
-                        }
-                      </span>
-
-                      <span>
-                        Price: ₹
-                        {Number(
-                          item.price
-                        ).toFixed(2)}
-                      </span>
-                    </div>
-
-                    <div className="item-total">
-                      ₹
-                      {Number(
-                        item.total
-                      ).toFixed(2)}
-                    </div>
+                  <div className="item-details">
+                    <strong>{item.product_name}</strong>
+                    <span>Quantity: {item.quantity}</span>
+                    <span>Price: ₹{Number(item.price).toFixed(2)}</span>
                   </div>
-                )
-              )}
+
+                  <div className="item-total">
+                    ₹{Number(item.total).toFixed(2)}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
 
           <div className="grand-total">
-            <span>
-              Total Amount
-            </span>
-
-            <strong>
-              ₹
-              {Number(
-                order.total_amount
-              ).toFixed(2)}
-            </strong>
+            <span>Total Amount</span>
+            <strong>₹{Number(order.total_amount).toFixed(2)}</strong>
           </div>
         </section>
 
-        {/* INFORMATION */}
-
         <section className="notice-card">
-          <div className="notice-icon">
-            📋
-          </div>
+          <div className="notice-icon">📋</div>
 
           <div>
-            <h3>
-              What happens next?
-            </h3>
+            <h3>What happens next?</h3>
 
             <p>
-              Your order will be reviewed
-              and processed. You can use
-              the order tracking option to
-              check the latest status of
+              Your order will be reviewed and processed. You can use
+              the order tracking option to check the latest status of
               your order.
             </p>
           </div>
         </section>
 
-        {/* BUTTONS */}
-
         <div className="button-row">
-
-          <Link
-            href="/paper-ink-store"
-            className="primary-button"
-          >
+          <Link href="/paper-ink-store" className="primary-button">
             🛒 Shop More
           </Link>
 
           <Link
-            href={`/track-order?orderId=${encodeURIComponent(
-              order.id
-            )}`}
+            href={`/track-order?orderId=${encodeURIComponent(order.id)}`}
             className="tracking-button"
           >
             📦 Track Order
           </Link>
 
-          <Link
-            href="/"
-            className="secondary-button"
-          >
+          <Link href="/" className="secondary-button">
             🏠 Home
           </Link>
-
         </div>
-
       </div>
 
       <style jsx>{`
         .confirmation-page {
           min-height: 100vh;
-          background:
-            linear-gradient(
-              135deg,
-              #eef4ff,
-              #f8fbff
-            );
+          background: linear-gradient(135deg, #eef4ff, #f8fbff);
           padding: 40px 20px 70px;
         }
 
@@ -785,9 +529,7 @@ export default function OrderConfirmationPage() {
           border-radius: 18px;
           padding: 35px 25px;
           text-align: center;
-          box-shadow:
-            0 8px 30px
-              rgba(0, 0, 0, 0.08);
+          box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
           margin-bottom: 20px;
         }
 
@@ -859,9 +601,7 @@ export default function OrderConfirmationPage() {
           background: white;
           border-radius: 16px;
           padding: 25px;
-          box-shadow:
-            0 8px 25px
-              rgba(0, 0, 0, 0.07);
+          box-shadow: 0 8px 25px rgba(0, 0, 0, 0.07);
           margin-bottom: 20px;
         }
 
@@ -1066,10 +806,7 @@ export default function OrderConfirmationPage() {
         }
 
         @media (max-width: 700px) {
-          .status-grid {
-            grid-template-columns: 1fr;
-          }
-
+          .status-grid,
           .details-grid {
             grid-template-columns: 1fr;
           }
@@ -1125,5 +862,29 @@ export default function OrderConfirmationPage() {
         }
       `}</style>
     </main>
+  );
+}
+
+export default function OrderConfirmationPage() {
+  return (
+    <Suspense
+      fallback={
+        <main
+          style={{
+            minHeight: "100vh",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            background: "#eef4ff",
+            color: "#1e3a8a",
+            fontSize: "20px",
+          }}
+        >
+          Loading order confirmation...
+        </main>
+      }
+    >
+      <OrderConfirmationContent />
+    </Suspense>
   );
 }

@@ -1,11 +1,12 @@
+
 "use client";
 
+import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-export default function PVCOrderConfirmationPage() {
+function PVCOrderConfirmationContent() {
   const searchParams = useSearchParams();
-
   const orderId = searchParams.get("orderId");
 
   return (
@@ -171,10 +172,33 @@ export default function PVCOrderConfirmationPage() {
             fontSize: "13px",
           }}
         >
-          🇮🇳 PVC orders are currently available within India only.
+          🇮🇳 PVC printing orders are currently available in West Bengal only.
         </p>
       </div>
     </main>
   );
 }
 
+export default function PVCOrderConfirmationPage() {
+  return (
+    <Suspense
+      fallback={
+        <main
+          style={{
+            minHeight: "100vh",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            background: "#f4f6f9",
+            color: "#166534",
+            fontSize: "20px",
+          }}
+        >
+          Loading order confirmation...
+        </main>
+      }
+    >
+      <PVCOrderConfirmationContent />
+    </Suspense>
+  );
+}
