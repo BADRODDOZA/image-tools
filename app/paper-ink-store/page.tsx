@@ -1389,7 +1389,7 @@ export default function PaperInkStorePage() {
             }}
           >
             <div>
-              <strong style={{ fontSize: "17px", color: "#111827" }}>
+              <strong style={{ fontSize: "17px", color: "#505663" }}>
                 🛒 {cartCount} {cartCount === 1 ? "item" : "items"}
               </strong>
               <div

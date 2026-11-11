@@ -146,6 +146,120 @@ export default function TrackOrderPage() {
     }
   };
 
+  const renderTrackingTimeline = (
+    status: string | null,
+    type: "PVC" | "STORE"
+  ) => {
+    const steps =
+      type === "PVC"
+        ? ["Pending", "Processing", "Printed", "Shipped", "Completed"]
+        : ["Pending", "Processing", "Packed", "Shipped", "Completed"];
+
+    const currentStatus = status || "Pending";
+    const terminalStatus =
+      currentStatus === "Cancelled" || currentStatus === "Rejected";
+    const currentIndex = steps.indexOf(currentStatus);
+
+    return (
+      <div
+        style={{
+          marginTop: "20px",
+          marginBottom: "20px",
+          padding: "20px 16px",
+          border: "1px solid #e5e7eb",
+          borderRadius: "12px",
+          background: "#ffffff",
+        }}
+      >
+        <h3 style={{ margin: "0 0 18px", fontSize: "17px", color: "#111827" }}>
+          Order Progress
+        </h3>
+
+        {terminalStatus ? (
+          <div
+            style={{
+              padding: "13px",
+              borderRadius: "9px",
+              background: "#fef2f2",
+              color: "#b91c1c",
+              fontWeight: "700",
+              textAlign: "center",
+            }}
+          >
+            {currentStatus === "Cancelled"
+              ? "This order has been cancelled."
+              : "This order has been rejected."}
+          </div>
+        ) : (
+          <div>
+            {steps.map((step, index) => {
+              const completed = currentIndex >= index;
+              const isCurrent = currentIndex === index;
+
+              return (
+                <div
+                  key={step}
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "12px",
+                    minHeight: index === steps.length - 1 ? "auto" : "48px",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      width: "22px",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: "18px",
+                        height: "18px",
+                        borderRadius: "50%",
+                        background: completed ? "#16a34a" : "#e5e7eb",
+                        border: isCurrent ? "3px solid #bbf7d0" : "none",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                    {index !== steps.length - 1 && (
+                      <div
+                        style={{
+                          width: "3px",
+                          height: "30px",
+                          background: currentIndex > index ? "#16a34a" : "#e5e7eb",
+                        }}
+                      />
+                    )}
+                  </div>
+
+                  <div style={{ paddingBottom: "13px", marginTop: "-2px" }}>
+                    <div
+                      style={{
+                        color: completed ? "#166534" : "#9ca3af",
+                        fontWeight: isCurrent ? "800" : "600",
+                        fontSize: "14px",
+                      }}
+                    >
+                      {step}
+                      {isCurrent ? " — Current status" : ""}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <p style={{ margin: "8px 0 0", color: "#64748b", fontSize: "12px" }}>
+          Progress updates when the order status is changed by the store.
+        </p>
+      </div>
+    );
+  };
+
   return (
     <main
       style={{
@@ -318,6 +432,8 @@ export default function TrackOrderPage() {
                     {pvcOrder.status || "Pending"}
                   </div>
                 </div>
+
+                {renderTrackingTimeline(pvcOrder.status, "PVC")}
 
                 <div
                   style={{
@@ -518,6 +634,8 @@ export default function TrackOrderPage() {
                     {storeOrder.status || "Pending"}
                   </div>
                 </div>
+
+                {renderTrackingTimeline(storeOrder.status, "STORE")}
 
                 <div
                   style={{
