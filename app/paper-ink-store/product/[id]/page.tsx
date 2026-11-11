@@ -496,7 +496,7 @@ export default function ProductDetailsPage() {
 
     if (goToCart) {
       router.push(
-        "/paper-ink-store/cart"
+        "/paper-ink-store/checkout"
       );
     }
   }
@@ -682,6 +682,12 @@ export default function ProductDetailsPage() {
   const cannotBuy =
     outOfStock ||
     unavailable;
+
+    console.log("Product status:", {
+     stock: product.stock,
+     is_active: product.is_active,
+     cannotBuy,
+    });
 
   return (
     <main
@@ -1407,8 +1413,8 @@ export default function ProductDetailsPage() {
                 }}
               >
                 {buyingNow
-                  ? "Opening Cart..."
-                  : "⚡ Buy Now"}
+                  ? "Opening Checkout..."
+                  : "⚡ Buy It Now"}  
               </button>
             </div>
           )}

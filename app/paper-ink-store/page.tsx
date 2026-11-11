@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -105,6 +104,54 @@ function addToCart(product: StoreProduct) {
   } catch (error) {
     console.error("Add to cart error:", error);
     alert("Could not add product to cart.");
+  }
+}
+
+
+function buyNow(product: StoreProduct, selectedQuantity: number) {
+  try {
+    if (product.stock <= 0) {
+      alert("This product is out of stock.");
+      return;
+    }
+
+    const quantity = Math.floor(Number(selectedQuantity));
+
+    if (!Number.isFinite(quantity) || quantity < 1) {
+      alert("Please select a valid quantity.");
+      return;
+    }
+
+    if (quantity > product.stock) {
+      alert(`Only ${product.stock} item(s) available in stock.`);
+      return;
+    }
+
+    const cart = getCart();
+    const existingItem = cart.find((item) => item.id === product.id);
+
+    const updatedItem: CartItem = {
+      id: product.id,
+      name: product.name,
+      category: product.category,
+      price: Number(product.price),
+      stock: Number(product.stock),
+      pack_size: product.pack_size,
+      gsm: product.gsm,
+      quantity,
+    };
+
+    if (existingItem) {
+      Object.assign(existingItem, updatedItem);
+    } else {
+      cart.push(updatedItem);
+    }
+
+    saveCart(cart);
+    window.location.href = "/paper-ink-store/checkout";
+  } catch (error) {
+    console.error("Buy now error:", error);
+    alert("Could not proceed to checkout. Please try again.");
   }
 }
 
@@ -376,29 +423,76 @@ function ProductCard({
                 Maximum available quantity reached
               </div>
             )}
+
+            <button
+              type="button"
+              onClick={() => buyNow(product, quantity)}
+              disabled={quantity < 1 || quantity > product.stock}
+              style={{
+                width: "100%",
+                marginTop: "10px",
+                padding: "12px",
+                border: "none",
+                borderRadius: "8px",
+                background: "#16a34a",
+                color: "#ffffff",
+                fontSize: "15px",
+                fontWeight: "bold",
+                cursor: "pointer",
+              }}
+            >
+              ⚡ Buy It Now
+            </button>
           </div>
         ) : (
-          <button
-            type="button"
-            onClick={() => {
-              addToCart(product);
-              refreshCart();
-            }}
-            disabled={outOfStock}
+          <div
             style={{
-              width: "100%",
-              padding: "12px",
-              border: "none",
-              borderRadius: "8px",
-              background: outOfStock ? "#9ca3af" : "#2563eb",
-              color: "#ffffff",
-              fontSize: "16px",
-              fontWeight: "bold",
-              cursor: outOfStock ? "not-allowed" : "pointer",
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "8px",
             }}
           >
-            {outOfStock ? "Out of Stock" : "🛒 Add to Cart"}
-          </button>
+            <button
+              type="button"
+              onClick={() => {
+                addToCart(product);
+                refreshCart();
+              }}
+              disabled={outOfStock}
+              style={{
+                width: "100%",
+                padding: "12px 8px",
+                border: "none",
+                borderRadius: "8px",
+                background: outOfStock ? "#9ca3af" : "#2563eb",
+                color: "#ffffff",
+                fontSize: "14px",
+                fontWeight: "bold",
+                cursor: outOfStock ? "not-allowed" : "pointer",
+              }}
+            >
+              {outOfStock ? "Out of Stock" : "🛒 Add to Cart"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => buyNow(product, 1)}
+              disabled={outOfStock}
+              style={{
+                width: "100%",
+                padding: "12px 8px",
+                border: "none",
+                borderRadius: "8px",
+                background: outOfStock ? "#9ca3af" : "#16a34a",
+                color: "#ffffff",
+                fontSize: "14px",
+                fontWeight: "bold",
+                cursor: outOfStock ? "not-allowed" : "pointer",
+              }}
+            >
+              ⚡ Buy It Now
+            </button>
+          </div>
         )}
       </div>
     </div>
